@@ -1,0 +1,21 @@
+# Author: Alex Rosenbauym
+# Date: 9 Dec, 2016
+#
+# rfs_filter
+# tool to blocking ingress packet flows by hardware steering
+# tool creates a flow steering rule on ConnectX4 according to specific flow tuple provided by command line
+# hardware packet drop is implemented by directing the ingress traffic to an empty receive queue (no post receives in RAW QP)
+# referance: https://community.mellanox.com/docs/DOC-2517
+
+$ make
+
+$ ./rfs_filter -d mlx5_0 -i 225.6.7.8 -p 2000
+Using ib device: 'mlx5_0'
+Target <ip:port>: e1060708:2000
+Translated mac: 01:00:5E:06:07:08
+Filter flow created
+Hit Ctril-C to exit
+^C
+
+
+
