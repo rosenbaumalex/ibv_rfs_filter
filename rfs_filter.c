@@ -31,9 +31,9 @@
  */
 
 #define _GNU_SOURCE
-#define _BSD_SOURCE
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <unistd.h>
 #include <string.h>
 #include <getopt.h>
@@ -42,11 +42,14 @@
 #include <linux/if_ether.h>
 
 #include <infiniband/verbs.h>
-#include <infiniband/verbs_exp.h>
 
-#define PORT_NUM 1
-#define RQ_NUM_DESC   32  /* Zero receive ring so we drop all ingress packets catch by our filter without processing */
-#define SQ_NUM_DESC   32  /* minimal send queue, although not used */
+#define PORT_NUM             1
+#define RQ_NUM_DESC          32  /* must have some minimum so RQ is created for flow steering command */
+#define SQ_NUM_DESC          32  /* minimal send queue, although not used */
+#define UDP_PORT_DEFAULT     11111
+
+// printf formating when IP is in network byte ordering (for LITTLE_ENDIAN)
+#define NIPQUAD(ip)         (uint8_t)((ip)&0xff), (uint8_t)(((ip)>>8)&0xff),(uint8_t)(((ip)>>16)&0xff),(uint8_t)(((ip)>>24)&0xff)
 
 // Creates multicast MAC from multicast IP
 // void create_multicast_mac_from_ip(uint8_t (& mc_mac) [6], in_addr_t ip)
@@ -96,9 +99,9 @@ int main(int argc, char *argv[])
 	struct ibv_pd *pd;
 	char  *ib_devname = NULL;
 	int    ib_port = 1;
-	uint8_t mac[ETH_ALEN];
-	struct in_addr dst_ip_addr;
-	unsigned int dsp_udp_port = 11111;
+	uint8_t mac[ETH_ALEN] = { 0, 0, 0, 0, 0, 0};
+	struct in_addr dst_ip_addr = { INADDR_ANY };
+	unsigned int dsp_udp_port = UDP_PORT_DEFAULT;
 	int ret;
 
 	/* 1. Parse user options from command line */
@@ -223,7 +226,7 @@ int main(int argc, char *argv[])
 	/* 8. Create Queue Pair (QP) - Receive Ring */
 	qp = ibv_create_qp(pd, &qp_init_attr);
 	if (!qp)  {
-		fprintf(stderr, "Couldn't create RSS QP (errno=%m %d)\n", errno);
+		fprintf(stderr, "Couldn't create RAW PACKET QP (errno=%m %d)\n", errno);
 		exit(1);
 	}
 
@@ -251,7 +254,7 @@ int main(int argc, char *argv[])
 	}
 
 	/* 11. map IP address to MAC Address for steering rule */
-	printf("Target <ip:port>: %8.8x:%d\n", htonl(dst_ip_addr.s_addr), dsp_udp_port);
+	printf("Target <ip:port>: %d.%d.%d.%d:%d\n", NIPQUAD(dst_ip_addr.s_addr), dsp_udp_port);
 	create_mac_from_ip(mac, dst_ip_addr.s_addr);
 
 	/* 12. Prepare steering rule to intercept packet to DEST_MAC and place packet in ring pointed by ->qp */
@@ -275,7 +278,7 @@ int main(int argc, char *argv[])
 			.size = sizeof(struct ibv_flow_spec_eth),
 			.val = {
 				.dst_mac = { mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]},
-				.src_mac = { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
+				.src_mac = { 0, 0, 0, 0, 0, 0},
 				.ether_type = ntohs(ETH_P_IP),
 				.vlan_tag = 0,
 			},
@@ -290,7 +293,7 @@ int main(int argc, char *argv[])
 			.type = IBV_FLOW_SPEC_IPV4,
 			.size = sizeof(struct ibv_flow_spec_ipv4),
 			.val = {
-				.dst_ip = ntohl(dst_ip_addr.s_addr),
+				.dst_ip = dst_ip_addr.s_addr,
 				.src_ip = 0x00000000,
 			},
 			.mask = {
@@ -302,7 +305,7 @@ int main(int argc, char *argv[])
 			.type = IBV_FLOW_SPEC_UDP,
 			.size = sizeof(struct ibv_flow_spec_tcp_udp),
 			.val = {
-				.dst_port = ntohs(dsp_udp_port),
+				.dst_port = htons(dsp_udp_port),
 				.src_port = 0x0000,
 			},
 			.mask = {
